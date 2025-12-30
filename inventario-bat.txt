@@ -1,0 +1,62 @@
+@echo off
+setlocal enabledelayedexpansion
+
+:: Configuración del nombre del archivo de salida
+set "outfile=Inventario_%COMPUTERNAME%.csv"
+
+echo Recopilando informacion detallada... Por favor espera.
+echo (Esto puede tardar unos segundos mas por el escaneo de USB e impresoras)
+
+:: Encabezados del CSV
+echo Numero_Serie,Hostname,Usuario,MAC_Ethernet,MAC_Wifi,Modelo,RAM_Total,Slots_Ocupados,Frecuencia_RAM,Disco_Capacidad,Disco_Tipo,Procesador,Windows,Antivirus,Impresoras,Dispositivos_USB > "%outfile%"
+
+:: 1. Numero de Serie
+for /f "tokens=2 delims==" %%a in ('wmic bios get serialnumber /value 2^>nul') do set "serial=%%a"
+
+:: 2. Hostname y Usuario
+set "host=%COMPUTERNAME%"
+set "user=%USERNAME%"
+
+:: 3. Direcciones MAC
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-NetAdapter | Where-Object { $_.Name -like '*Ethernet*' } | Select-Object -ExpandProperty MacAddress -ErrorAction SilentlyContinue"') do set "mac_eth=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-NetAdapter | Where-Object { $_.Name -like '*Wi-Fi*' -or $_.Name -like '*Wireless*' } | Select-Object -ExpandProperty MacAddress -ErrorAction SilentlyContinue"') do set "mac_wifi=%%a"
+
+:: 4. Modelo del Equipo
+for /f "tokens=2 delims==" %%a in ('wmic csproduct get name /value 2^>nul') do set "model=%%a"
+
+:: 5. RAM
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "[math]::round((Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB)"') do set "ram_total=%%a GB"
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "(Get-CimInstance Win32_PhysicalMemory).Count"') do set "ram_slots=%%a"
+for /f "tokens=2 delims==" %%a in ('wmic memorychip get speed /value ^| findstr "Speed" 2^>nul') do set "ram_freq=%%a MHz"
+
+:: 6. Disco
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "$d = Get-PhysicalDisk | Select-Object -First 1; $cap = [math]::round($d.Size / 1GB); \"$cap GB\""') do set "disk_cap=%%a"
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "$d = Get-PhysicalDisk | Select-Object -First 1; $d.MediaType"') do set "disk_type=%%a"
+
+:: 7. Procesador y Windows
+for /f "tokens=2 delims==" %%a in ('wmic cpu get name /value 2^>nul') do set "cpu=%%a"
+for /f "tokens=2 delims==" %%a in ('wmic os get caption /value 2^>nul') do set "win=%%a"
+
+:: 8. Antivirus
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | Select-Object -ExpandProperty displayName -ErrorAction SilentlyContinue"') do set "av=%%a"
+
+:: 9. Impresoras (Agrupadas por ;)
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "$p = Get-Printer | Select-Object -ExpandProperty Name; [string]::Join(' ; ', $p)"') do set "printers=%%a"
+
+:: 10. Dispositivos USB Conectados (Agrupados por ;)
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "$u = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'USB' -and $_.FriendlyName -notmatch 'Hub' -and $_.FriendlyName -notmatch 'Controlador' }; [string]::Join(' ; ', $u.FriendlyName)"') do set "usb_devs=%%a"
+
+:: Limpieza de caracteres que rompen el CSV (comas)
+set "cpu=%cpu:,= %"
+set "win=%win:,= %"
+set "model=%model:,= %"
+set "printers=%printers:,= %"
+set "usb_devs=%usb_devs:,= %"
+
+:: Escribir datos al archivo CSV
+echo "%serial%","%host%","%user%","%mac_eth%","%mac_wifi%","%model%","%ram_total%","%ram_slots%","%ram_freq%","%disk_cap%","%disk_type%","%cpu%","%win%","%av%","%printers%","%usb_devs%" >> "%outfile%"
+
+echo.
+echo Proceso finalizado. Se han agregado impresoras y dispositivos USB.
+echo Archivo: %outfile%
+pause
